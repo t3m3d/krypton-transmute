@@ -1,0 +1,4 @@
+Candidate packaged from the supplied image. Original preserved as reference.png.
+Artwork padded to square in dark navy and scaled to 1024 px, without cropping.
+Includes PNG, complete macOS iconset, and ICNS with PNG representations.
+Active assets/AppIcon.icns and build configuration were not changed.

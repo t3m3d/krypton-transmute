@@ -34,6 +34,14 @@ if [ -f "$ROOT/assets/AppIcon.icns" ]; then
   cp "$ROOT/assets/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
 fi
 
+# Toolbox back end. The app looks in Application Support first, so install the
+# helper there as well as inside the bundle (no bundle-path lookup needed).
+if [ -f "$ROOT/src/toolkit.py" ]; then
+  cp "$ROOT/src/toolkit.py" "$RESOURCES_DIR/toolkit.py"
+  mkdir -p "$HOME/Library/Application Support/Krypton Transmute"
+  cp "$ROOT/src/toolkit.py" "$HOME/Library/Application Support/Krypton Transmute/toolkit.py"
+fi
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
