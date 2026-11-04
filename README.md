@@ -5,8 +5,8 @@ Krypton on `k:okui` (Objective-K over AppKit); conversion runs through macOS
 `sips`/ImageIO for images, `textutil`/`cupsfilter` for documents,
 `afconvert`/`afinfo` for audio, `avconvert` for video, and the Python standard
 library (through the bundled `src/toolkit.py`) for tables, structured data,
-markup, e-books, subtitles, archives and 3D meshes. No C, Objective-C or Swift
-source is involved.
+markup, e-books, subtitles, archives, 3D meshes, text encodings and fonts. No C,
+Objective-C or Swift source is involved.
 
 ## Features
 
@@ -32,8 +32,8 @@ source is involved.
 - **Audio conversion.** A third panel converts with `afconvert`: AAC, Apple
   Lossless, WAV, AIFF, CAF and FLAC, with an AAC bitrate control (see below).
 - **Toolbox conversion.** A fourth panel covers video, tables, structured data,
-  markup, e-books, subtitles, archives and 3D meshes — 28 target formats behind
-  one grouped list (see Toolbox formats).
+  markup, e-books, subtitles, archives, 3D meshes, text encodings and fonts —
+  36 target formats behind one grouped list (see Toolbox formats).
 - **Queue table** with type, dimensions or kind and file size, an activity log,
   progress bar and "Reveal last output" in Finder.
 - **Purple editor-style dark theme**, monospaced throughout, with menu
@@ -81,10 +81,12 @@ library only), which the build installs into
 | Tables | csv, tsv, json, xlsx | CSV, TSV, JSON, XLSX |
 | Structured data | json, yaml, yml, toml, xml, plist | JSON, YAML, TOML, XML |
 | Markup | html, htm, md, markdown, txt | HTML, Markdown, TXT |
-| E-books | epub, html, htm, md, markdown, txt | EPUB, HTML, TXT, Markdown |
+| E-books | epub, html, htm, md, markdown, txt | EPUB, HTML, TXT, Markdown, DOCX |
 | Subtitles | srt, vtt, ass, ssa | SRT, VTT, ASS |
 | Archives | zip, tar, tgz, gz | ZIP, TAR, TGZ |
-| 3D models | obj, stl, ply | OBJ, ASCII STL, ASCII PLY |
+| 3D models | obj, stl, ply, glb, gltf | OBJ, ASCII STL, ASCII PLY, GLB, glTF |
+| Text encoding | txt, md, csv, tsv, json, yaml, xml, html, srt, vtt, ass | UTF-8, UTF-16, Latin-1, Windows-1252 (extension kept) |
+| Fonts | ttf, otf | WOFF (WOFF 1.0) |
 
 The target format is one grouped list (`Tables · CSV`, `Video · MP4`, …); the
 family follows from that choice. Files from another family are skipped and
@@ -92,11 +94,12 @@ reported instead of being forced through a converter. Video takes a maximum
 height (480/720/1080); EPUB takes a title.
 
 **Not offered, and why:** MP3/OGG encoding, MKV/WebM and video-to-GIF need
-FFmpeg, which is not installed; 7Z needs p7zip; WOFF/WOFF2 needs fontTools'
-`woff2_compress`. The panel says so rather than shipping half-working
-converters. YAML/TOML cover the ordinary configuration subset (mappings,
-sequences, scalars, tables), and XLSX round-trips cell values without formulas
-or styling.
+FFmpeg, which is not installed; 7Z needs p7zip; WOFF2 needs fontTools'
+`woff2_compress`. The panel's tooltip names these instead of shipping
+half-working converters. DOCX is written through macOS `textutil`, and WOFF is
+built from the font's own tables. YAML/TOML cover the ordinary configuration
+subset (mappings, sequences, scalars, tables), and XLSX round-trips cell values
+without formulas or styling.
 
 ## Requirements
 
@@ -135,8 +138,9 @@ source and the ICO's six-size header), every document format plus the PDF
 header, RTF→DOCX text fidelity, document scanning, every audio format plus an
 AAC bitrate comparison and audio scanning, every toolbox family (CSV/TSV/JSON/
 XLSX round trips, JSON↔YAML/TOML/XML, Markdown↔HTML↔TXT, EPUB build and
-re-extract, SRT↔VTT↔ASS timings, ZIP↔TAR↔TGZ contents, OBJ↔STL↔PLY geometry),
-the video preset mapping, and the path/size helpers — 179 checks. Krypton's
+re-extract, EPUB→DOCX text fidelity, SRT↔VTT↔ASS timings, ZIP↔TAR↔TGZ contents,
+OBJ↔STL↔PLY↔GLB geometry, UTF-8→Latin-1/UTF-16 bytes, a real TTF→WOFF build),
+the video preset mapping, and the path/size helpers — 200 checks. Krypton's
 `exit` does not propagate a status through `kcc -r`, so the shell harness fails
 on the "checks failed" summary line.
 
@@ -150,7 +154,8 @@ src/engine.ks        Conversion engine: image, document, audio and toolbox
 src/transmute.ks     The app: palette, window layout, all four panels, state,
                      actions, menus
 src/toolkit.py       Python stdlib parsers for tables, data, markup, e-books,
-                     subtitles, archives and meshes (installed by the build)
+                     subtitles, archives, meshes, text encodings and WOFF
+                     fonts (installed by the build)
 src/engine_test.ks   Engine checks
 assets/AppIcon.icns  App icon asset
 scripts/build-app.sh Compiles with kcc and assembles the .app bundle
@@ -173,11 +178,17 @@ single-file edit.
   formats).
 - MP3 output is unavailable on macOS (see Audio formats); lossless audio keeps
 the source's sample rate and channel count.
-- Fonts (TTF/OTF → WOFF/WOFF2) and 7Z archives are not converted: no
-  `woff2_compress` or p7zip is installed. Video is limited to `avconvert`'s
+- Fonts convert to WOFF 1.0 only: WOFF2 needs fontTools' `woff2_compress`, and
+  7Z needs p7zip; neither is installed. Video is limited to `avconvert`'s
   presets, so MKV/WebM/GIF output would need FFmpeg.
 - Toolbox parsing is single-threaded and the e-book reader flattens a book's
   chapters into one document; EPUB images and CSS are not carried across.
+  DOCX keeps the text and basic styling that `textutil` understands.
+- glTF/GLB carry vertex positions and triangles; node translations, rotations,
+  scales and matrices are applied on import. Materials, normals and textures are
+  dropped, and instanced meshes are merged into one object.
+- Encoding conversion detects UTF-8/UTF-16 by BOM and replaces characters the
+  chosen target cannot represent (for example an em dash in Latin-1).
 - XLSX and YAML/TOML support the common subset: cell values, mappings,
   sequences and scalars, not formulas, styling or spec corner cases.
 - Icon output ignores the format, quality and resize settings: icons always use

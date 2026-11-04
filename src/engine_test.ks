@@ -157,10 +157,15 @@ just run {
 
     // Toolbox
     check(toolboxReady() == 1, "toolbox back end installed")
-    check(toolFormatTotal() == 28, "grouped format list totals 28")
+    check(toolFormatTotal() == 36, "grouped format list totals 36")
     check(toolCategoryForFormat(0) == 0, "first format is video")
-    check(toolCategoryForFormat(27) == 7, "last format is a mesh")
-    check(toolLocalIndex(27) == 2, "mesh format index is local")
+    check(toolCategoryForFormat(35) == 9, "last format is a font")
+    check(toolCategoryForFormat(31) == 8, "encoding family follows the meshes")
+    check(toolLocalIndex(28) == 2, "PLY format index is local")
+    check(toolCategoryForFormat(19) == 4, "DOCX stays in the e-book family")
+    check(toolLocalIndex(19) == 4, "DOCX local index")
+    check(contains(toolFormatGlobalName(19), "DOCX") == 1, "DOCX appears in the grouped list")
+    check(toolCategoryForExt("ttf") == 9, "ttf belongs to fonts")
     check(toolCategoryForExt("csv") == 1, "csv belongs to tables")
     check(toolCategoryForExt("png") == -1, "png is not a toolbox family")
     check(toolAccepts(1, "x.csv") == 1, "tables accept csv")
@@ -241,6 +246,44 @@ just run {
     let objBack = toolConvert(7, plyOut, 0, "", dir, "-objback")
     check(contains(exec("cat " + shq(objBack)), "f 1 2 3") == 1, "PLY back to OBJ")
     check(contains(toolInfo(7, stlOut), "1 tris") == 1, "mesh detail counts triangles")
+
+    // glTF / GLB
+    let glbOut = toolConvert(7, objFixture, 3, "", dir, "-glb")
+    check(fileExists(glbOut), "OBJ to GLB written")
+    check(contains(exec("head -c 4 " + shq(glbOut)), "glTF") == 1, "GLB signature")
+    let gltfOut = toolConvert(7, objFixture, 4, "", dir, "-gltf")
+    check(contains(exec("cat " + shq(gltfOut)), "\"asset\"") == 1, "glTF JSON written")
+    let objFromGlb = toolConvert(7, glbOut, 0, "", dir, "-glbobj")
+    check(contains(exec("cat " + shq(objFromGlb)), "f 1 2 3") == 1, "GLB back to OBJ")
+    let shiftedGltf = dir + "/shifted.gltf"
+    shellRun("/usr/bin/python3 -c \"import json; d=json.load(open(" + shq(gltfOut) + ")); d['nodes'][0]['translation']=[10,0,0]; json.dump(d, open(" + shq(shiftedGltf) + ", 'w'))\"")
+    let shiftedObj = toolConvert(7, shiftedGltf, 0, "", dir, "-shiftobj")
+    check(contains(exec("cat " + shq(shiftedObj)), "v 10.000000") == 1, "glTF node translation applied")
+
+    // E-book DOCX
+    let docxBook = toolConvert(4, epubOut, 4, "", dir, "-bookdocx")
+    check(fileExists(docxBook), "EPUB to DOCX written")
+    check(contains(exec("textutil -convert txt -stdout " + shq(docxBook) + " 2>/dev/null"), "Title") == 1, "DOCX keeps the book text")
+
+    // Text encoding
+    let encFixture = dir + "/cafe.txt"
+    writeFile(encFixture, "café naïve\n")
+    let latinOut = toolConvert(8, encFixture, 2, "", dir, "-latin1")
+    check(fileExists(latinOut), "UTF-8 to Latin-1 written")
+    check(extOf(latinOut) == "txt", "encoding keeps the extension")
+    check(contains(exec("iconv -f ISO-8859-1 -t UTF-8 " + shq(latinOut)), "café") == 1, "Latin-1 bytes decode back")
+    let utf16Out = toolConvert(8, encFixture, 1, "", dir, "-utf16")
+    check(contains(exec("iconv -f utf-16 -t utf-8 " + shq(utf16Out)), "naïve") == 1, "UTF-16 round-trips")
+    check(contains(toolInfo(8, encFixture), "words") == 1, "encoding detail counts words")
+
+    // Fonts → WOFF
+    let fontFixture = "/System/Library/Fonts/Supplemental/Arial.ttf"
+    check(fileExists(fontFixture), "system font fixture present")
+    let woffOut = toolConvert(9, fontFixture, 0, "", dir, "-woff")
+    check(fileExists(woffOut), "TTF to WOFF written")
+    check(contains(exec("head -c 4 " + shq(woffOut)), "wOFF") == 1, "WOFF signature")
+    check(contains(toolInfo(9, fontFixture), "tables") == 1, "font detail counts tables")
+
     check(lineCount(toolScan(6, dir)) >= 1, "toolbox folder scan")
 
     // Helpers

@@ -736,7 +736,7 @@ func toolOutput(args) {
     emit exec(shq(py) + " " + shq(toolkitPath()) + " " + args + " 2>/dev/null")
 }
 
-func toolCategoryCount() { emit 8 }
+func toolCategoryCount() { emit 10 }
 
 func toolCategoryName(i) {
     let c = toInt(i)
@@ -747,7 +747,9 @@ func toolCategoryName(i) {
     if c == 4 { emit "E-books" }
     if c == 5 { emit "Subtitles" }
     if c == 6 { emit "Archives" }
-    emit "3D models"
+    if c == 7 { emit "3D models" }
+    if c == 8 { emit "Text encoding" }
+    emit "Fonts"
 }
 
 func toolCategoryKey(i) {
@@ -759,13 +761,18 @@ func toolCategoryKey(i) {
     if c == 4 { emit "ebook" }
     if c == 5 { emit "subs" }
     if c == 6 { emit "archive" }
-    emit "models"
+    if c == 7 { emit "models" }
+    if c == 8 { emit "encoding" }
+    emit "fonts"
 }
 
 func toolFormatCount(cat) {
     let c = toInt(cat)
-    if c == 0 || c == 1 || c == 2 || c == 4 { emit 4 }
-    emit 3
+    if c == 0 || c == 1 || c == 2 { emit 4 }
+    if c == 3 || c == 5 || c == 6 { emit 3 }
+    if c == 4 || c == 7 { emit 5 }
+    if c == 8 { emit 4 }
+    emit 1
 }
 
 func toolFormatName(cat, i) {
@@ -798,7 +805,8 @@ func toolFormatName(cat, i) {
         if k == 0 { emit "EPUB" }
         if k == 1 { emit "HTML" }
         if k == 2 { emit "TXT" }
-        emit "Markdown"
+        if k == 3 { emit "Markdown" }
+        emit "DOCX"
     }
     if c == 5 {
         if k == 0 { emit "SRT" }
@@ -810,9 +818,20 @@ func toolFormatName(cat, i) {
         if k == 1 { emit "TAR" }
         emit "TGZ"
     }
-    if k == 0 { emit "OBJ" }
-    if k == 1 { emit "STL" }
-    emit "PLY"
+    if c == 7 {
+        if k == 0 { emit "OBJ" }
+        if k == 1 { emit "STL" }
+        if k == 2 { emit "PLY" }
+        if k == 3 { emit "GLB" }
+        emit "glTF"
+    }
+    if c == 8 {
+        if k == 0 { emit "UTF-8" }
+        if k == 1 { emit "UTF-16" }
+        if k == 2 { emit "Latin-1" }
+        emit "Windows-1252"
+    }
+    emit "WOFF"
 }
 
 func toolFormatExt(cat, i) {
@@ -845,7 +864,8 @@ func toolFormatExt(cat, i) {
         if k == 0 { emit "epub" }
         if k == 1 { emit "html" }
         if k == 2 { emit "txt" }
-        emit "md"
+        if k == 3 { emit "md" }
+        emit "docx"
     }
     if c == 5 {
         if k == 0 { emit "srt" }
@@ -857,16 +877,31 @@ func toolFormatExt(cat, i) {
         if k == 1 { emit "tar" }
         emit "tgz"
     }
-    if k == 0 { emit "obj" }
-    if k == 1 { emit "stl" }
-    emit "ply"
+    if c == 7 {
+        if k == 0 { emit "obj" }
+        if k == 1 { emit "stl" }
+        if k == 2 { emit "ply" }
+        if k == 3 { emit "glb" }
+        emit "gltf"
+    }
+    if c == 8 { emit "txt" }
+    emit "woff"
 }
 
-func toolFormatKey(cat, i) { emit toolFormatExt(cat, i) }
+func toolFormatKey(cat, i) {
+    let k = toInt(i)
+    if toInt(cat) == 8 {
+        if k == 0 { emit "utf8" }
+        if k == 1 { emit "utf16" }
+        if k == 2 { emit "latin1" }
+        emit "cp1252"
+    }
+    emit toolFormatExt(cat, i)
+}
 
 /// The panel shows one grouped list, so these map a global format index to
 /// its family and to that family's own index.
-func toolFormatTotal() { emit 28 }
+func toolFormatTotal() { emit 36 }
 
 func toolCategoryForFormat(g) {
     let k = toInt(g)
@@ -874,10 +909,12 @@ func toolCategoryForFormat(g) {
     if k < 8 { emit 1 }
     if k < 12 { emit 2 }
     if k < 15 { emit 3 }
-    if k < 19 { emit 4 }
-    if k < 22 { emit 5 }
-    if k < 25 { emit 6 }
-    emit 7
+    if k < 20 { emit 4 }
+    if k < 23 { emit 5 }
+    if k < 26 { emit 6 }
+    if k < 31 { emit 7 }
+    if k < 35 { emit 8 }
+    emit 9
 }
 
 func toolLocalIndex(g) {
@@ -888,9 +925,11 @@ func toolLocalIndex(g) {
     if cat == 2 { offset = 8 }
     if cat == 3 { offset = 12 }
     if cat == 4 { offset = 15 }
-    if cat == 5 { offset = 19 }
-    if cat == 6 { offset = 22 }
-    if cat == 7 { offset = 25 }
+    if cat == 5 { offset = 20 }
+    if cat == 6 { offset = 23 }
+    if cat == 7 { offset = 26 }
+    if cat == 8 { offset = 31 }
+    if cat == 9 { offset = 35 }
     emit k - offset
 }
 
@@ -909,7 +948,8 @@ func toolCategoryForExt(e) {
     if ext == "epub" { emit 4 }
     if ext == "srt" || ext == "vtt" || ext == "ass" || ext == "ssa" { emit 5 }
     if ext == "zip" || ext == "tar" || ext == "tgz" || ext == "gz" { emit 6 }
-    if ext == "obj" || ext == "stl" || ext == "ply" { emit 7 }
+    if ext == "obj" || ext == "stl" || ext == "ply" || ext == "glb" || ext == "gltf" { emit 7 }
+    if ext == "ttf" || ext == "otf" { emit 9 }
     emit -1
 }
 
@@ -941,10 +981,12 @@ func toolHint(cat) {
     if c == 1 { emit "csv ↔ tsv ↔ json ↔ xlsx" }
     if c == 2 { emit "json ↔ yaml ↔ toml ↔ xml" }
     if c == 3 { emit "markdown ↔ html ↔ txt" }
-    if c == 4 { emit "epub ↔ html · txt · markdown" }
+    if c == 4 { emit "epub ↔ html · txt · markdown · docx" }
     if c == 5 { emit "srt ↔ vtt ↔ ass" }
     if c == 6 { emit "zip ↔ tar ↔ tgz · 7z needs p7zip" }
-    emit "obj ↔ stl ↔ ply · triangles only"
+    if c == 7 { emit "obj ↔ stl ↔ ply ↔ glb/gltf · triangles only" }
+    if c == 8 { emit "utf-8 ↔ utf-16 ↔ latin-1 ↔ windows-1252" }
+    emit "ttf/otf → woff · woff2 needs fontTools"
 }
 
 /// Pipe-separated extensions a family can read.
@@ -957,7 +999,9 @@ func toolExtList(cat) {
     if c == 4 { emit "epub|html|htm|md|markdown|txt" }
     if c == 5 { emit "srt|vtt|ass|ssa" }
     if c == 6 { emit "zip|tar|tgz|gz" }
-    emit "obj|stl|ply"
+    if c == 7 { emit "obj|stl|ply|glb|gltf" }
+    if c == 8 { emit "txt|md|markdown|csv|tsv|json|yaml|yml|toml|xml|html|htm|srt|vtt|ass" }
+    emit "ttf|otf"
 }
 
 func toolAccepts(cat, p) {
@@ -1033,7 +1077,9 @@ func toolConvert(cat, source, formatIndex, option, outputDir, suffix) {
     if toInt(cat) == 0 { emit convertVideo(source, formatIndex, option, dir, suffix) }
     if toolboxReady() == 0 { emit "" }
 
-    let out = uniqueOutput(source, dir, suffix, toolFormatExt(cat, formatIndex))
+    let outExt = toolFormatExt(cat, formatIndex)
+    if toInt(cat) == 8 { outExt = extOf(source) }
+    let out = uniqueOutput(source, dir, suffix, outExt)
     let args = "convert " + shq(toolCategoryKey(cat)) + " " +
         shq(toolFormatKey(cat, formatIndex)) + " " + shq(source) + " " +
         shq(out) + " " + shq(option)

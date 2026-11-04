@@ -8,7 +8,8 @@ on the Python standard library, while media stays on Apple's own tools
     toolkit.py convert <family> <format> <source> <output> [option]
     toolkit.py info <family> <path>
 
-Families: tables, data, markup, ebook, subs, archive, models.
+Families: tables, data, markup, ebook, subs, archive, models, encoding,
+fonts. DOCX output hands the generated HTML to macOS `textutil`.
 Exit status is 0 on success; failures explain themselves on stderr.
 """
 
@@ -22,7 +23,9 @@ import os
 import re
 import shutil
 import struct
+import subprocess
 import sys
+import zlib
 import tarfile
 import tempfile
 import zipfile
@@ -990,6 +993,20 @@ def make_epub(body_html, title):
     return chapter, container, opf, nav
 
 
+def write_docx(html_doc, dst):
+    tool = shutil.which('textutil') or '/usr/bin/textutil'
+    temp = dst + '.kt.html'
+    write_text(temp, html_doc)
+    try:
+        result = subprocess.run([tool, '-convert', 'docx', '-output', dst, temp],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    finally:
+        if os.path.exists(temp):
+            os.remove(temp)
+    if result.returncode != 0 or not os.path.exists(dst):
+        raise ValueError('textutil could not write DOCX')
+
+
 def convert_ebook(fmt, src, dst, option):
     ext = ext_of(src)
     title = option.strip() or os.path.splitext(os.path.basename(src))[0]
@@ -1005,6 +1022,8 @@ def convert_ebook(fmt, src, dst, option):
             write_text(dst, html_to_text(body))
         elif fmt in ('md', 'markdown'):
             write_text(dst, html_to_md(body))
+        elif fmt == 'docx':
+            write_docx(html_doc, dst)
         else:
             raise ValueError('unsupported e-book target ' + fmt)
         return
@@ -1020,6 +1039,8 @@ def convert_ebook(fmt, src, dst, option):
         body = text_to_html(text)
         md = text
 
+    html_doc = ('<!DOCTYPE html>\n<html><head><meta charset="utf-8"><title>%s</title>'
+                '</head><body>\n%s\n</body></html>\n' % (esc(title), body))
     if fmt == 'epub':
         chapter, container, opf, nav = make_epub(body, title)
         with zipfile.ZipFile(dst, 'w') as book:
@@ -1029,12 +1050,13 @@ def convert_ebook(fmt, src, dst, option):
             book.writestr('OEBPS/nav.xhtml', nav)
             book.writestr('OEBPS/chapter1.xhtml', chapter)
     elif fmt == 'html':
-        write_text(dst, '<!DOCTYPE html>\n<html><head><meta charset="utf-8"><title>%s</title>'
-                        '</head><body>\n%s\n</body></html>\n' % (esc(title), body))
+        write_text(dst, html_doc)
     elif fmt == 'txt':
         write_text(dst, html_to_text(body))
     elif fmt in ('md', 'markdown'):
         write_text(dst, md)
+    elif fmt == 'docx':
+        write_docx(html_doc, dst)
     else:
         raise ValueError('unsupported e-book target ' + fmt)
 
@@ -1309,6 +1331,8 @@ def load_mesh(path):
         return stl_load(path)
     if ext == 'ply':
         return ply_load(read_text(path))
+    if ext in ('glb', 'gltf'):
+        return gltf_load(path)
     raise ValueError('unsupported mesh source .' + ext)
 
 
@@ -1343,6 +1367,223 @@ def write_ply(path, verts, tris):
     write_text(path, '\n'.join(lines) + '\n')
 
 
+def gltf_buffer(gltf, index, base_dir, glb_bin):
+    buffer = gltf['buffers'][index]
+    uri = buffer.get('uri', '')
+    if uri.startswith('data:'):
+        header, payload = uri.split(',', 1)
+        if ';base64' in header:
+            return base64.b64decode(payload)
+        return payload.encode('utf-8')
+    if uri:
+        with open(os.path.join(base_dir, uri), 'rb') as handle:
+            return handle.read()
+    if glb_bin is not None:
+        return glb_bin
+    raise ValueError('glTF buffer has no data')
+
+
+def gltf_accessor(gltf, index, base_dir, glb_bin):
+    accessor = gltf['accessors'][index]
+    if 'bufferView' not in accessor:
+        raise ValueError('glTF accessor has no buffer view')
+    view = gltf['bufferViews'][accessor['bufferView']]
+    blob = gltf_buffer(gltf, view['buffer'], base_dir, glb_bin)
+    width = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4}[accessor['type']]
+    code, size = {5120: ('b', 1), 5121: ('B', 1), 5122: ('h', 2),
+                  5123: ('H', 2), 5125: ('I', 4), 5126: ('f', 4)}[accessor['componentType']]
+    stride = view.get('byteStride') or size * width
+    start = view.get('byteOffset', 0) + accessor.get('byteOffset', 0)
+    values = []
+    for item in range(accessor['count']):
+        offset = start + item * stride
+        chunk = blob[offset:offset + size * width]
+        if len(chunk) < size * width:
+            raise ValueError('glTF accessor runs past its buffer')
+        values.append(struct.unpack('<' + code * width, chunk))
+    return values
+
+
+def mat4_identity():
+    return [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+
+
+def mat4_multiply(a, b):
+    out = [0.0] * 16
+    for column in range(4):
+        for row in range(4):
+            out[column * 4 + row] = sum(a[k * 4 + row] * b[column * 4 + k]
+                                        for k in range(4))
+    return out
+
+
+def node_matrix(node):
+    if 'matrix' in node and len(node['matrix']) == 16:
+        return [float(value) for value in node['matrix']]
+    tx, ty, tz = node.get('translation', [0, 0, 0])
+    qx, qy, qz, qw = node.get('rotation', [0, 0, 0, 1])
+    sx, sy, sz = node.get('scale', [1, 1, 1])
+    matrix = [0.0] * 16
+    matrix[0] = (1 - 2 * (qy * qy + qz * qz)) * sx
+    matrix[1] = (2 * (qx * qy + qz * qw)) * sx
+    matrix[2] = (2 * (qx * qz - qy * qw)) * sx
+    matrix[4] = (2 * (qx * qy - qz * qw)) * sy
+    matrix[5] = (1 - 2 * (qx * qx + qz * qz)) * sy
+    matrix[6] = (2 * (qy * qz + qx * qw)) * sy
+    matrix[8] = (2 * (qx * qz + qy * qw)) * sz
+    matrix[9] = (2 * (qy * qz - qx * qw)) * sz
+    matrix[10] = (1 - 2 * (qx * qx + qy * qy)) * sz
+    matrix[12], matrix[13], matrix[14] = tx, ty, tz
+    matrix[15] = 1.0
+    return matrix
+
+
+def transform_point(matrix, point):
+    x, y, z = point
+    w = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15]
+    if abs(w) < 1e-12:
+        w = 1.0
+    return ((matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12]) / w,
+            (matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13]) / w,
+            (matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14]) / w)
+
+
+def gltf_instances(gltf):
+    meshes = gltf.get('meshes', [])
+    nodes = gltf.get('nodes', [])
+    if not nodes:
+        return [(index, mat4_identity()) for index in range(len(meshes))]
+    scenes = gltf.get('scenes', [])
+    if scenes:
+        scene_index = gltf.get('scene', 0)
+        if not isinstance(scene_index, int) or not 0 <= scene_index < len(scenes):
+            scene_index = 0
+        roots = list(scenes[scene_index].get('nodes', []))
+        if not roots:
+            for scene in scenes:
+                roots.extend(scene.get('nodes', []))
+    else:
+        children = set()
+        for node in nodes:
+            children.update(node.get('children', []))
+        roots = [index for index in range(len(nodes)) if index not in children]
+
+    instances = []
+    seen = set()
+
+    def walk(index, parent, depth):
+        if index in seen or not 0 <= index < len(nodes) or depth > 64:
+            return
+        seen.add(index)
+        node = nodes[index]
+        world = mat4_multiply(parent, node_matrix(node))
+        if 'mesh' in node:
+            instances.append((node['mesh'], world))
+        for child in node.get('children', []):
+            walk(child, world, depth + 1)
+
+    for root in roots:
+        walk(root, mat4_identity(), 0)
+    if not instances:
+        return [(index, mat4_identity()) for index in range(len(meshes))]
+    return instances
+
+
+def gltf_load(path):
+    data = open(path, 'rb').read()
+    gltf = None
+    glb_bin = None
+    if ext_of(path) == 'glb':
+        magic, version, total = struct.unpack('<4sII', data[:12])
+        if magic != b'glTF' or version != 2:
+            raise ValueError('not a glTF 2.0 binary')
+        offset = 12
+        while offset + 8 <= len(data):
+            length, kind = struct.unpack('<II', data[offset:offset + 8])
+            offset += 8
+            chunk = data[offset:offset + length]
+            offset += length
+            if kind == 0x4E4F534A:
+                gltf = json.loads(chunk.decode('utf-8').rstrip('\x00 '))
+            elif kind == 0x004E4942:
+                glb_bin = chunk
+    else:
+        gltf = json.loads(read_text(path))
+    if not isinstance(gltf, dict):
+        raise ValueError('glTF has no JSON document')
+
+    base_dir = os.path.dirname(path)
+    verts, tris = [], []
+    meshes = gltf.get('meshes', [])
+    for mesh_index, world in gltf_instances(gltf):
+        if not 0 <= mesh_index < len(meshes):
+            continue
+        for primitive in meshes[mesh_index].get('primitives', []):
+            attributes = primitive.get('attributes', {})
+            if 'POSITION' not in attributes or primitive.get('mode', 4) != 4:
+                continue
+            positions = gltf_accessor(gltf, attributes['POSITION'], base_dir, glb_bin)
+            base = len(verts)
+            verts.extend(transform_point(world, p) for p in positions)
+            if 'indices' in primitive:
+                raw = [i[0] for i in gltf_accessor(gltf, primitive['indices'], base_dir, glb_bin)]
+            else:
+                raw = list(range(len(positions)))
+            for k in range(0, len(raw) - 2, 3):
+                tris.append((base + raw[k], base + raw[k + 1], base + raw[k + 2]))
+    return verts, tris
+
+
+def gltf_document(verts, tris, embed):
+    positions = b''.join(struct.pack('<3f', x, y, z) for x, y, z in verts)
+    indices = b''.join(struct.pack('<3I', a, b, c) for a, b, c in tris)
+    blob = positions + indices
+    buffer = {'byteLength': len(blob)}
+    if embed:
+        buffer['uri'] = ('data:application/octet-stream;base64,' +
+                         base64.b64encode(blob).decode('ascii'))
+    bounds = [[min(v[a] for v in verts) for a in range(3)],
+              [max(v[a] for v in verts) for a in range(3)]]
+    document = {
+        'asset': {'version': '2.0', 'generator': 'Krypton Transmute'},
+        'buffers': [buffer],
+        'bufferViews': [
+            {'buffer': 0, 'byteOffset': 0, 'byteLength': len(positions), 'target': 34962},
+            {'buffer': 0, 'byteOffset': len(positions), 'byteLength': len(indices), 'target': 34963},
+        ],
+        'accessors': [
+            {'bufferView': 0, 'componentType': 5126, 'count': len(verts), 'type': 'VEC3',
+             'min': bounds[0], 'max': bounds[1]},
+            {'bufferView': 1, 'componentType': 5125, 'count': len(tris) * 3, 'type': 'SCALAR'},
+        ],
+        'meshes': [{'primitives': [{'attributes': {'POSITION': 0}, 'indices': 1, 'mode': 4}]}],
+        'nodes': [{'mesh': 0}],
+        'scenes': [{'nodes': [0]}],
+        'scene': 0,
+    }
+    return document, blob
+
+
+def write_gltf(path, verts, tris):
+    document, blob = gltf_document(verts, tris, True)
+    write_text(path, json.dumps(document, indent=2) + '\n')
+
+
+def write_glb(path, verts, tris):
+    document, blob = gltf_document(verts, tris, False)
+    packed = json.dumps(document, separators=(',', ':')).encode('utf-8')
+    packed += b' ' * ((4 - len(packed) % 4) % 4)
+    binary = blob + b'\x00' * ((4 - len(blob) % 4) % 4)
+    total = 12 + 8 + len(packed) + 8 + len(binary)
+    with open(path, 'wb') as handle:
+        handle.write(struct.pack('<4sII', b'glTF', 2, total))
+        handle.write(struct.pack('<II', len(packed), 0x4E4F534A))
+        handle.write(packed)
+        handle.write(struct.pack('<II', len(binary), 0x004E4942))
+        handle.write(binary)
+
+
 def convert_model(fmt, src, dst):
     verts, tris = load_mesh(src)
     if not tris:
@@ -1353,8 +1594,117 @@ def convert_model(fmt, src, dst):
         write_stl(dst, verts, tris)
     elif fmt == 'ply':
         write_ply(dst, verts, tris)
+    elif fmt == 'glb':
+        write_glb(dst, verts, tris)
+    elif fmt == 'gltf':
+        write_gltf(dst, verts, tris)
     else:
         raise ValueError('unsupported mesh target ' + fmt)
+
+
+# ── text encoding: utf-8 / utf-16 / latin-1 / windows-1252 ───────────────────
+
+ENCODING_TARGETS = {
+    'utf8': 'utf-8',
+    'utf16': 'utf-16',
+    'latin1': 'latin-1',
+    'cp1252': 'cp1252',
+}
+
+
+def decode_any(data):
+    if data.startswith(b'\xff\xfe') or data.startswith(b'\xfe\xff'):
+        return data.decode('utf-16')
+    if data.startswith(b'\xef\xbb\xbf'):
+        return data.decode('utf-8-sig')
+    for encoding in ('utf-8', 'cp1252', 'latin-1'):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode('utf-8', 'replace')
+
+
+def convert_encoding(fmt, src, dst):
+    target = ENCODING_TARGETS.get(fmt)
+    if target is None:
+        raise ValueError('unsupported encoding target ' + fmt)
+    with open(src, 'rb') as handle:
+        text = decode_any(handle.read())
+    if fmt == 'utf8':
+        payload = text.encode('utf-8')
+    elif fmt == 'utf16':
+        payload = text.encode('utf-16')
+    else:
+        payload = text.encode(target, 'replace')
+    with open(dst, 'wb') as handle:
+        handle.write(payload)
+
+
+# ── fonts: ttf/otf → woff (WOFF 1.0, zlib tables) ─────────────────
+
+def read_sfnt(path):
+    with open(path, 'rb') as handle:
+        data = handle.read()
+    if data[:4] in (b'wOFF', b'ttcf'):
+        raise ValueError('only single TTF/OTF fonts can become WOFF')
+    if len(data) < 12:
+        raise ValueError('truncated font')
+    count = struct.unpack('>H', data[4:6])[0]
+    tables = []
+    offset = 12
+    for _ in range(count):
+        if offset + 16 > len(data):
+            raise ValueError('truncated font directory')
+        tag, checksum, start, length = struct.unpack('>4sIII', data[offset:offset + 16])
+        offset += 16
+        if start + length > len(data):
+            raise ValueError('font table runs past the file')
+        tables.append((tag, checksum, data[start:start + length]))
+    if not tables:
+        raise ValueError('font has no tables')
+    return data[:4], tables
+
+
+def write_woff(path, flavor, tables):
+    tables = sorted(tables, key=lambda item: item[0])
+    count = len(tables)
+    directory = bytearray()
+    payload = bytearray()
+    offset = 44 + 20 * count
+    total_sfnt = 12 + 16 * count
+    for tag, checksum, raw in tables:
+        packed = zlib.compress(raw, 9)
+        if len(packed) >= len(raw):
+            packed = raw
+        directory += struct.pack('>4sIIII', tag, offset + len(payload), len(packed),
+                                 len(raw), checksum)
+        payload += packed
+        payload += b'\x00' * ((4 - len(payload) % 4) % 4)
+        total_sfnt += (len(raw) + 3) // 4 * 4
+    length = 44 + len(directory) + len(payload)
+    header = (b'wOFF' + flavor + struct.pack('>I', length) +
+              struct.pack('>HH', count, 0) + struct.pack('>I', total_sfnt) +
+              struct.pack('>HH', 1, 0) + struct.pack('>IIIII', 0, 0, 0, 0, 0))
+    with open(path, 'wb') as handle:
+        handle.write(header + directory + payload)
+
+
+def convert_font(fmt, src, dst):
+    if fmt != 'woff':
+        raise ValueError('unsupported font target ' + fmt)
+    flavor, tables = read_sfnt(src)
+    write_woff(dst, flavor, tables)
+
+
+def font_table_count(path):
+    with open(path, 'rb') as handle:
+        data = handle.read()
+    if data[:4] == b'wOFF':
+        return struct.unpack('>H', data[12:14])[0]
+    if data[:4] == b'ttcf':
+        return 0
+    return struct.unpack('>H', data[4:6])[0]
 
 
 # ── info for the queue table ────────────────────────────────────────
@@ -1388,6 +1738,11 @@ def describe(family, path):
         if family == 'models':
             verts, tris = load_mesh(path)
             return '%d tris' % len(tris)
+        if family == 'encoding':
+            with open(path, 'rb') as handle:
+                return '%d words' % len(decode_any(handle.read()).split())
+        if family == 'fonts':
+            return '%d tables' % font_table_count(path)
     except Exception:
         return ''
     return ''
@@ -1425,6 +1780,10 @@ def main(argv):
                 convert_archive(fmt, src, dst)
             elif family == 'models':
                 convert_model(fmt, src, dst)
+            elif family == 'encoding':
+                convert_encoding(fmt, src, dst)
+            elif family == 'fonts':
+                convert_font(fmt, src, dst)
             else:
                 raise ValueError('unknown family ' + family)
             if not os.path.exists(dst):
