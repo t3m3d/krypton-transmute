@@ -167,14 +167,15 @@ func paintChip(btn, tone) {
 func styleChip(btn) { emit paintChip(btn, cControl()) }
 
 // Borderless layer-backed NSButtons stop drawing their title entirely when
-// AppKit disables them. Keep the button enabled and dim the whole chip
-// instead; every action already guards its own empty-queue case.
-func setActionState(btn, ready) {
+// AppKit disables them. Keep the button enabled and dim its text instead;
+// setting alpha on a visible layer-backed button crashes the Krypton runtime.
+// Every action already guards its own empty-queue case.
+func setActionState(btn, ready, activeColor) {
     msg_1(btn, "setEnabled:", 1)
     if toInt(ready) == 1 {
-        msg_d1(btn, "setAlphaValue:", 1.0)
+        doButtonTextColor(btn, activeColor)
     } else {
-        msg_d1(btn, "setAlphaValue:", 0.72)
+        doButtonTextColor(btn, cFaint())
     }
     emit "1"
 }
@@ -380,11 +381,11 @@ func renderImageList() {
     doText(g_queueLabel, "IMAGES   " + g_count + "   ·   " + humanBytes(g_bytes))
     doTextBox(g_list, imageTableBody())
     if g_count > 0 {
-        setActionState(g_convert, 1)
-        setActionState(g_icons, 1)
+        setActionState(g_convert, 1, cGreen())
+        setActionState(g_icons, 1, cPurple())
     } else {
-        setActionState(g_convert, 0)
-        setActionState(g_icons, 0)
+        setActionState(g_convert, 0, cGreen())
+        setActionState(g_icons, 0, cPurple())
     }
     emit "1"
 }
@@ -393,9 +394,9 @@ func renderDocList() {
     doText(g_queueLabel, "DOCUMENTS   " + g_docCount + "   ·   " + humanBytes(g_docBytes))
     doTextBox(g_list, documentTableBody())
     if g_docCount > 0 {
-        setActionState(g_docConvert, 1)
+        setActionState(g_docConvert, 1, cGreen())
     } else {
-        setActionState(g_docConvert, 0)
+        setActionState(g_docConvert, 0, cGreen())
     }
     emit "1"
 }
@@ -429,9 +430,9 @@ func renderAudioList() {
     doText(g_queueLabel, "AUDIO   " + g_audioCount + "   ·   " + humanBytes(g_audioBytes))
     doTextBox(g_list, audioTableBody())
     if g_audioCount > 0 {
-        setActionState(g_audioConvert, 1)
+        setActionState(g_audioConvert, 1, cGreen())
     } else {
-        setActionState(g_audioConvert, 0)
+        setActionState(g_audioConvert, 0, cGreen())
     }
     emit "1"
 }
@@ -470,9 +471,9 @@ func renderToolList() {
     doText(g_queueLabel, "TOOLBOX   " + g_toolCount + "   ·   " + humanBytes(g_toolBytes))
     doTextBox(g_list, toolTableBody())
     if g_toolCount > 0 {
-        setActionState(g_toolConvert, 1)
+        setActionState(g_toolConvert, 1, cGreen())
     } else {
-        setActionState(g_toolConvert, 0)
+        setActionState(g_toolConvert, 0, cGreen())
     }
     emit "1"
 }
@@ -631,7 +632,7 @@ func resetQueue() {
         g_toolCount = 0
         g_toolBytes = 0
         g_lastToolOut = ""
-        setActionState(g_toolReveal, 0)
+        setActionState(g_toolReveal, 0, cMuted())
         setStatus("Toolbox queue cleared.")
     }
     if g_mode == "audio" {
@@ -639,7 +640,7 @@ func resetQueue() {
         g_audioCount = 0
         g_audioBytes = 0
         g_lastAudioOut = ""
-        setActionState(g_audioReveal, 0)
+        setActionState(g_audioReveal, 0, cMuted())
         setStatus("Audio queue cleared.")
     }
     if g_mode == "docs" {
@@ -647,7 +648,7 @@ func resetQueue() {
         g_docCount = 0
         g_docBytes = 0
         g_lastDocOut = ""
-        setActionState(g_docReveal, 0)
+        setActionState(g_docReveal, 0, cMuted())
         setStatus("Document queue cleared.")
     }
     if g_mode == "images" {
@@ -655,7 +656,7 @@ func resetQueue() {
         g_count = 0
         g_bytes = 0
         g_lastOut = ""
-        setActionState(g_reveal, 0)
+        setActionState(g_reveal, 0, cMuted())
         setStatus("Image queue cleared.")
     }
     doTextBox(g_log, "")
@@ -930,8 +931,8 @@ func onBuildIcons(self, cmd, sender) {
     let suffix = text(g_suffix)
     let total = lineCount(g_files)
 
-    setActionState(g_icons, 0)
-    setActionState(g_reveal, 0)
+    setActionState(g_icons, 0, cPurple())
+    setActionState(g_reveal, 0, cMuted())
     doProgress(g_progress, 0)
     setStatus("Building app icons…")
     logLine("")
@@ -972,8 +973,8 @@ func onBuildIcons(self, cmd, sender) {
     }
 
     doProgress(g_progress, 100)
-    setActionState(g_icons, 1)
-    if len(g_lastOut) > 0 { setActionState(g_reveal, 1) }
+    setActionState(g_icons, 1, cPurple())
+    if len(g_lastOut) > 0 { setActionState(g_reveal, 1, cMuted()) }
     setStatus("Icon sets " + made + "  ·  failed " + failed)
     logLine("Done. " + made + " icon sets, " + failed + " failed.")
 
@@ -1018,8 +1019,8 @@ func onConvert(self, cmd, sender) {
     let suffix = text(g_suffix)
     let total = lineCount(g_files)
 
-    setActionState(g_convert, 0)
-    setActionState(g_reveal, 0)
+    setActionState(g_convert, 0, cGreen())
+    setActionState(g_reveal, 0, cMuted())
     doProgress(g_progress, 0)
     setStatus("Converting " + g_count + " images to " + formatName(format) + "…")
     logLine("")
@@ -1053,8 +1054,8 @@ func onConvert(self, cmd, sender) {
     }
 
     doProgress(g_progress, 100)
-    setActionState(g_convert, 1)
-    if len(g_lastOut) > 0 { setActionState(g_reveal, 1) }
+    setActionState(g_convert, 1, cGreen())
+    if len(g_lastOut) > 0 { setActionState(g_reveal, 1, cMuted()) }
     setStatus("Converted " + converted + "  ·  failed " + failed + "  ·  " + formatName(format))
     logLine("Done. " + converted + " converted, " + failed + " failed.")
 
@@ -1084,8 +1085,8 @@ func onConvertDocs(self, cmd, sender) {
     let suffix = text(g_docSuffix)
     let total = lineCount(g_docs)
 
-    setActionState(g_docConvert, 0)
-    setActionState(g_docReveal, 0)
+    setActionState(g_docConvert, 0, cGreen())
+    setActionState(g_docReveal, 0, cMuted())
     doProgress(g_progress, 0)
     setStatus("Converting " + g_docCount + " documents to " + docFormatName(format) + "…")
     logLine("")
@@ -1120,8 +1121,8 @@ func onConvertDocs(self, cmd, sender) {
     }
 
     doProgress(g_progress, 100)
-    setActionState(g_docConvert, 1)
-    if len(g_lastDocOut) > 0 { setActionState(g_docReveal, 1) }
+    setActionState(g_docConvert, 1, cGreen())
+    if len(g_lastDocOut) > 0 { setActionState(g_docReveal, 1, cMuted()) }
     setStatus("Converted " + converted + "  ·  failed " + failed + "  ·  " + docFormatName(format))
     logLine("Done. " + converted + " converted, " + failed + " failed.")
 
@@ -1155,8 +1156,8 @@ func onConvertAudio(self, cmd, sender) {
     let suffix = text(g_audioSuffix)
     let total = lineCount(g_audioFiles)
 
-    setActionState(g_audioConvert, 0)
-    setActionState(g_audioReveal, 0)
+    setActionState(g_audioConvert, 0, cGreen())
+    setActionState(g_audioReveal, 0, cMuted())
     doProgress(g_progress, 0)
     setStatus("Converting " + g_audioCount + " tracks to " + audioFormatName(format) + "…")
     logLine("")
@@ -1191,8 +1192,8 @@ func onConvertAudio(self, cmd, sender) {
     }
 
     doProgress(g_progress, 100)
-    setActionState(g_audioConvert, 1)
-    if len(g_lastAudioOut) > 0 { setActionState(g_audioReveal, 1) }
+    setActionState(g_audioConvert, 1, cGreen())
+    if len(g_lastAudioOut) > 0 { setActionState(g_audioReveal, 1, cMuted()) }
     setStatus("Converted " + converted + "  ·  failed " + failed + "  ·  " + audioFormatName(format))
     logLine("Done. " + converted + " converted, " + failed + " failed.")
 
@@ -1234,8 +1235,8 @@ func onConvertTools(self, cmd, sender) {
     let suffix = text(g_toolSuffix)
     let total = lineCount(g_toolFiles)
 
-    setActionState(g_toolConvert, 0)
-    setActionState(g_toolReveal, 0)
+    setActionState(g_toolConvert, 0, cGreen())
+    setActionState(g_toolReveal, 0, cMuted())
     doProgress(g_progress, 0)
     setStatus("Converting to " + toolFormatGlobalName(global) + "…")
     logLine("")
@@ -1275,8 +1276,8 @@ func onConvertTools(self, cmd, sender) {
     }
 
     doProgress(g_progress, 100)
-    setActionState(g_toolConvert, 1)
-    if len(g_lastToolOut) > 0 { setActionState(g_toolReveal, 1) }
+    setActionState(g_toolConvert, 1, cGreen())
+    if len(g_lastToolOut) > 0 { setActionState(g_toolReveal, 1, cMuted()) }
     setStatus("Converted " + converted + "  ·  skipped " + skipped + "  ·  failed " + failed)
     logLine("Done. " + converted + " converted, " + skipped + " skipped, " + failed + " failed.")
 
@@ -1464,11 +1465,11 @@ just run {
     g_icons = imgButton(win, "Build icons", area(rightX, H - 700, 160, 24))
     doButtonTextColor(g_icons, cPurple())
     doTip(g_icons, "Writes a macOS .icns and a Windows .ico (16-256 px) from a square crop.")
-    setActionState(g_icons, 0)
+    setActionState(g_icons, 0, cPurple())
 
     g_reveal = imgButton(win, "Reveal output", area(rightX + 168, H - 700, 160, 24))
     doButtonTextColor(g_reveal, cMuted())
-    setActionState(g_reveal, 0)
+    setActionState(g_reveal, 0, cMuted())
 
     // ── Document panel: conversion settings ───────────────────────────
     let docSettingsLabel = docLabel(win, "DOCUMENT SETTINGS", area(rightX, H - 148, rightW, 14), cAmber(), 10)
@@ -1515,7 +1516,7 @@ just run {
 
     g_docReveal = docButton(win, "Reveal output", area(rightX, H - 556, 160, 24))
     doButtonTextColor(g_docReveal, cMuted())
-    setActionState(g_docReveal, 0)
+    setActionState(g_docReveal, 0, cMuted())
 
     // ── Audio panel: conversion settings ──────────────────────────────
     let audioSettingsLabel = audioLabel(win, "AUDIO SETTINGS", area(rightX, H - 148, rightW, 14), cAmber(), 10)
@@ -1566,7 +1567,7 @@ just run {
 
     g_audioReveal = audioButton(win, "Reveal output", area(rightX, H - 586, 160, 24))
     doButtonTextColor(g_audioReveal, cMuted())
-    setActionState(g_audioReveal, 0)
+    setActionState(g_audioReveal, 0, cMuted())
 
     // ── Toolbox panel ────────────────────────────────────────────────
     let toolSettingsLabel = toolLabel(win, "TOOLBOX", area(rightX, H - 148, rightW, 14), cAmber(), 10)
@@ -1620,7 +1621,7 @@ just run {
 
     g_toolReveal = toolButton(win, "Reveal output", area(rightX, H - 612, 160, 24))
     doButtonTextColor(g_toolReveal, cMuted())
-    setActionState(g_toolReveal, 0)
+    setActionState(g_toolReveal, 0, cMuted())
 
     // Wiring
     doClick(addBtn, "add", funcptr(onAdd))
