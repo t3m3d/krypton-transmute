@@ -14,11 +14,11 @@ let g_fail = 0
 func check(ok, label) {
     if toInt(ok) == 1 {
         g_pass = g_pass + 1
-        kp("  PASS   " + label)
+        print("  PASS   " + label)
         emit "1"
     }
     g_fail = g_fail + 1
-    kp("  FAIL   " + label)
+    print("  FAIL   " + label)
     emit "0"
 }
 
@@ -28,8 +28,8 @@ func detectedFormat(p) {
 }
 
 just run {
-    kp("Krypton Transmute — engine checks")
-    kp("")
+    print("Krypton Transmute — engine checks")
+    print("")
 
     let dir = trim(exec("mktemp -d /tmp/krypton-transmute.XXXXXX"))
     check(len(dir) > 0, "temporary workspace")
@@ -294,11 +294,11 @@ just run {
 
     shellRun("rm -rf " + shq(dir))
 
-    kp("")
+    print("")
     let total = g_pass + g_fail
     if g_fail > 0 {
-        kp("" + g_fail + " of " + total + " checks failed")
+        print("" + g_fail + " of " + total + " checks failed")
     } else {
-        kp("All " + total + " checks passed")
+        print("All " + total + " checks passed")
     }
 }
